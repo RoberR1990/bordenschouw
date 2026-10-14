@@ -1,0 +1,25 @@
+{
+ "name": "Bordenschouw",
+ "short_name": "Bordenschouw",
+ "description": "Schouw verkeersborden met foto, live GPS en kompas (prototype).",
+ "start_url": ".",
+ "scope": ".",
+ "display": "standalone",
+ "lang": "nl",
+ "background_color": "#EEF3EE",
+ "theme_color": "#005C15",
+ "icons": [
+  {
+   "src": "icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "any maskable"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any maskable"
+  }
+ ]
+}

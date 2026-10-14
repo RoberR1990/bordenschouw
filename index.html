@@ -240,6 +240,10 @@ textarea.exp{width:100%;min-height:150px;border:1.5px solid #7E9283;padding:8px;
 .pill.mini{font-size:.75rem;padding:1px 9px}
 
 /* loopmodus */
+.nak-bar{max-width:760px;margin:0 0 14px;padding:10px 14px;border:2px solid #7A4300;background:#FBEBC8;color:#5a3200;border-radius:4px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-weight:700}
+.nak-bar[hidden],#round-block[hidden]{display:none}
+.nak-bar span{flex:1 1 auto}
+.q-th{object-fit:cover}
 .loop{position:fixed;inset:0;z-index:100;background:#0b130e;color:#fff}
 .loop[hidden]{display:none}
 .loop video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
@@ -305,6 +309,15 @@ textarea.exp{width:100%;min-height:150px;border:1.5px solid #7E9283;padding:8px;
       <span class="small muted" style="flex:1 1 220px">Houd de telefoon rechtop richting de borden en loop rustig. De app maakt zelf foto's. Alleen het stukje met het bord gaat naar de AI.</span>
     </div>
     <p id="loop-note" class="note warn" hidden role="status"></p>
+  </section>
+
+  <div class="nak-bar" id="nak-bar" hidden role="status"><span id="nak-n"></span><button type="button" class="btn sm primary" id="b-nak-go">Nakijken</button></div>
+
+  <section class="panel" id="round-block" style="max-width:760px;margin-bottom:14px" aria-labelledby="h-round" hidden>
+    <h3 id="h-round" style="margin:0 0 4px">Laatste ronde</h3>
+    <p class="small muted" id="round-sum" style="margin:0 0 8px"></p>
+    <ol class="queue" id="round-list" aria-label="Resultaten van de loopmodus"></ol>
+    <div class="row" style="margin-top:10px"><button type="button" class="btn quiet sm" id="b-round-clear" hidden>Lijst leegmaken</button></div>
   </section>
 
   <section class="panel" id="fast-block" style="max-width:760px;margin-bottom:14px" aria-labelledby="h-fast">
@@ -1198,11 +1211,13 @@ function saveBord(){
     datum:cur.datum,thumb:thumbOf(cur.crop),vastlegging:'nagekeken',
     herkomst:{bordsoort:sr.bordsoort||'handmatig',staat:sr.staat||'handmatig',tekst:sr.tekst||'handmatig',plek:cur.locSrc||'handmatig',richting:rd?(cur.dirSrc||'handmatig'):'handmatig',datum:cur.datumSrc||'handmatig'}});
   own.unshift(b); const res=saveOwn(); const e=enrich(b); buzz(60);
-  if(cur.review){ const it=cur.review; cur.review=null; it.status='vastgelegd'; it.vastlegging='nagekeken'; it.bordId=b.id; it.summary={code:e.code,gebied:e.gebied,status:e.status}; it.thumb=b.thumb||it.thumb; it.canvas=null; it.msg=''; renderQueue(); }
+  let nextRev=null;
+  if(cur.review){ const it=cur.review; cur.review=null; if(it.loop){ nextRev=true; } it.status='vastgelegd'; it.vastlegging='nagekeken'; it.bordId=b.id; it.summary={code:e.code,gebied:e.gebied,status:e.status}; it.thumb=b.thumb||it.thumb; it.canvas=null; it.big=''; it.bigs=null; it.msg=''; saveNak(); renderQueue(); }
   showResult(e,res);
   cur.photo=null;cur.crop=null;cur.blob=null;cur.loc=null;cur.exif=null;miniMap.extra=null;
   resetFields();steps(1);$('#f-foto').value='';$('#b-ai').textContent='Laat AI lezen';
   $('#result-card').scrollIntoView({block:'start'});
+  if(nextRev){ const nx=Q.items.find(x=>x.status==='nakijken'&&x.loop); if(nx)setTimeout(()=>openReview(nx),50); }
 }
 let lastId=null;
 function showResult(e,res){
@@ -1347,8 +1362,15 @@ function fastNote(text,kind){ const n=$('#fast-note'); n.className='note fast-no
 const NOAI='AI-herkenning staat uit. Vul bij Data een Gemini-sleutel in, of open een foto met "Handmatig" om hem zelf in te vullen.';
 function newItem(o){ return Object.assign({n:++Q.n,status:'wacht',msg:'',warn:'',exif:null,canvas:null,ai:null,thumb:'',kader:null,missing:[],summary:null,vastlegging:null,bordId:null},o); }
 function toBlobAsync(c,q){ return new Promise(res=>{ try{ c.toBlob(b=>res(b),'image/jpeg',q); }catch(e){ res(null); } }); }
+function canvasFromUrl(u){ return new Promise(res=>{ try{ const im=new Image(); im.onerror=()=>res(null); im.onload=()=>{ try{ const c=document.createElement('canvas'); c.width=im.naturalWidth; c.height=im.naturalHeight; c.getContext('2d').drawImage(im,0,0); res(c); }catch(e){ res(null); } }; im.src=u; }catch(e){ res(null); } }); }
 async function prepareItem(it){
-  if(it.canvas)return true; if(!it.file)return false;
+  if(it.canvas)return true;
+  if(it.loop&&it.nid&&!it.file){
+    let c=it.big?await canvasFromUrl(it.big):null;
+    if(!c){ c=document.createElement('canvas'); c.width=480; c.height=360; const g=c.getContext('2d'); g.fillStyle='#d9ded9'; g.fillRect(0,0,480,360); g.fillStyle='#333'; g.font='bold 20px sans-serif'; g.textAlign='center'; g.fillText('Foto niet bewaard',240,175); g.font='16px sans-serif'; g.fillText('Kies de bordsoort zelf',240,205); it.msg=(it.msg||'')+' De foto is niet bewaard.'; }
+    it.canvas=c; if(!it.thumb)it.thumb=thumbOf(c,112); return true;
+  }
+  if(!it.file)return false;
   const r=await readPhoto(it.file,it.snap); if(!r)return false;
   it.canvas=r.canvas; it.exif=r.exif; it.thumb=thumbOf(r.canvas,112); return true;
 }
@@ -1405,7 +1427,7 @@ function handleResult(it,v){
   if(!hasLoc)miss.push('Geen plek in de foto');
   if(v.personen)miss.push('Er lijken mensen of kentekens in beeld');
   if(v.aantal!==null&&v.aantal>1){ it.warn='Er staan meer borden op deze foto. Maak per bord een foto.'; if(miss.length)miss.push('Meerdere borden in beeld'); }
-  if(miss.length){ it.status='nakijken'; it.missing=miss; it.msg=miss.join('. ')+'.'; buzz([40,60,40]); return; }
+  if(miss.length){ it.status='nakijken'; it.missing=miss; it.msg=miss.join('. ')+'.'; buzz([40,60,40]); if(it.loop)nakAdd(it); return; }
   autoSave(it,v,kader);
 }
 function autoSave(it,v,kader){
@@ -1435,7 +1457,8 @@ async function openReview(it){
 }
 function renderQueue(){
   const ol=$('#queue'); ol.replaceChildren();
-  Q.items.forEach(it=>{
+  const QI=Q.items.filter(x=>!x.loop);
+  QI.forEach(it=>{
     const li=h('li',{class:'q-row','data-status':it.status});
     li.append(it.thumb?h('img',{class:'q-th',src:it.thumb,alt:'',width:56,height:56}):h('span',{class:'q-th empty','aria-hidden':'true'}));
     const main=h('div',{class:'q-main'},[h('div',{class:'q-top'},[h('span',{class:'q-name',text:it.name}),qpill(it.status)])]);
@@ -1452,14 +1475,14 @@ function renderQueue(){
     if(act.children.length)li.append(act);
     ol.append(li);
   });
-  const wacht=Q.items.filter(x=>x.status==='wacht').length;
+  const wacht=QI.filter(x=>x.status==='wacht').length;
   $('#b-q-stop').hidden=!Q.running;
   $('#b-q-go').hidden=!(!Q.running&&(Q.halt==='stop'||Q.halt==='rate'||Q.halt==='fout')&&wacht>0&&aiOn());
-  $('#b-q-clear').hidden=!(!Q.running&&Q.items.length>0);
-  const sum=$('#q-sum'), n=Q.items.length;
-  try{ loopRefresh(); }catch(e){}
+  $('#b-q-clear').hidden=!(!Q.running&&QI.length>0);
+  const sum=$('#q-sum'), n=QI.length;
+  try{ renderRound(); loopRefresh(); }catch(e){}
   if(!n){ sum.hidden=true; return; }
-  const c=st=>Q.items.filter(x=>x.status===st);
+  const c=st=>QI.filter(x=>x.status===st);
   const auto=c('vastgelegd').filter(x=>x.vastlegging!=='nagekeken').length, nag=c('vastgelegd').length-auto;
   const busy=c('ai').length;
   let t=n+(n===1?' foto: ':' foto\'s: ')+auto+' automatisch vastgelegd, '+c('nakijken').length+' nakijken, '+c('mislukt').length+' mislukt';
@@ -1805,7 +1828,7 @@ function loopShoot(t,now){
   loop.blocks.push({t:now,cls:t.cls,box:Object.assign({},t.box),cover:cb,pos:snap&&snap.loc?{lat:snap.loc.lat,lon:snap.loc.lon}:(live.fix?{lat:live.fix.lat,lon:live.fix.lon}:null)});
   try{ if(navigator.vibrate)navigator.vibrate(40); }catch(e){}
   loopBeep();
-  const it=newItem({name:'Loopfoto '+loop.shots}); it.loop=true; it.canvas=c; it.exif=ex; it.thumb=thumbOf(c,112); it.status='wacht';
+  const it=newItem({name:'Loopfoto '+loop.shots}); it.loop=true; it.round=loop.round; it.canvas=c; it.exif=ex; it.thumb=thumbOf(c,112); it.status='wacht';
   Q.items.push(it);
   // wachtrij in loopmodus: maximaal 6, bij vol vervalt de oudste
   let w=Q.items.filter(x=>x.loop&&x.status==='wacht');
@@ -1848,7 +1871,7 @@ function loopDraw(now){
   loopPills();
 }
 function loopCounts(){
-  const L=Q.items.filter(x=>x.loop), c=st=>L.filter(x=>x.status===st).length;
+  const L=Q.items.filter(x=>x.loop&&x.round===loop.round), c=st=>L.filter(x=>x.status===st).length;
   return{foto:loop.shots,vast:c('vastgelegd'),nak:c('nakijken'),dub:c('dubbel'),mis:c('mislukt'),wacht:c('wacht')+c('ai'),skip:loop.skipped};
 }
 function loopPills(){
@@ -1870,6 +1893,7 @@ function loopSummaryText(){
 function loopRefresh(){
   if(!$('#loop')||$('#loop').hidden||$('#loop-sum').hidden)return;
   const C=loopCounts(); $('#loop-sum-text').textContent=loopSummaryText();
+  const nk=Q.items.filter(x=>x.status==='nakijken').length; $('#b-loop-review').textContent=nk?'Nakijken ('+nk+')':'Naar Schouwen';
   const w=$('#loop-sum-wait'); w.textContent=C.wacht?'Nog '+C.wacht+(C.wacht===1?' foto wordt':' foto\'s worden')+' gelezen…'+(loop.fatal?' ('+loop.fatal+')':''):''; w.hidden=!C.wacht;
 }
 // wachtrij leeghalen met kostenbewaking: max N per minuut, bij een te druk antwoord 30 s pauze
@@ -1922,7 +1946,7 @@ async function startLoop(){
   for(let i=0;i<50&&!v.videoWidth;i++)await sleep(100);
   if(!v.videoWidth){ stream.getTracks().forEach(t=>t.stop()); v.srcObject=null; loop.stream=null; if(loop.startedRonde&&live.on)stopRonde(); loopNote('De camera gaf geen beeld.'); return; }
   Object.assign(loop,{on:true,tracks:[],blocks:[],calls:[],pauseUntil:0,shots:0,skipped:0,seen:[],seenTracks:0,prev:null,small:null,diff:99,stillRuns:0,acc:0,rot:0,mot:0,pa:null,flash:0,lastShot:0,notice:'',fatal:'',lastKey:'',lastBordId:null});
-  Q.items=Q.items.filter(x=>!x.loop); renderQueue();
+  loop.round=Date.now(); Q.items=Q.items.filter(x=>!x.loop||x.status==='nakijken'); renderQueue();
   document.body.style.overflow='hidden'; $('#loop').hidden=false; $('#loop-sum').hidden=true; $('#loop-live').hidden=false; v.hidden=false;
   try{ window.addEventListener('devicemotion',onMotion,true); }catch(e){}
   stream.getVideoTracks().forEach(t=>t.addEventListener('ended',()=>{ if(loop.on)stopLoop(); }));
@@ -1945,13 +1969,77 @@ function stopLoop(){
   try{ $('#b-loop-review').focus(); }catch(e){}
 }
 function closeLoop(){ $('#loop').hidden=true; document.body.style.overflow=''; }
+
+/* ---------- loopmodus: nakijken bewaren + Laatste ronde ---------- */
+const LS_NAK='bordenschouw.nakijken.v1';
+function bigUrl(c,max,q){ try{ const m=Math.min(1,max/Math.max(c.width,c.height)); const t=document.createElement('canvas'); t.width=Math.max(1,Math.round(c.width*m)); t.height=Math.max(1,Math.round(c.height*m)); t.getContext('2d').drawImage(c,0,0,t.width,t.height); return t.toDataURL('image/jpeg',q); }catch(e){ return ''; } }
+function nakAdd(it){
+  it.nid=it.nid||uid();
+  if(it.canvas&&!it.bigs)it.bigs=[bigUrl(it.canvas,800,0.8),bigUrl(it.canvas,480,0.6),bigUrl(it.canvas,240,0.5)];
+  saveNak();
+}
+function saveNak(){
+  const list=Q.items.filter(x=>x.loop&&x.status==='nakijken'&&x.nid);
+  const mk=k=>JSON.stringify(list.map(it=>{ const b=it.bigs||(it.big?[it.big]:[]); return {id:it.nid,name:it.name,exif:it.exif,ai:it.ai,kader:it.kader,missing:it.missing,msg:it.msg,warn:it.warn,thumb:it.thumb,img:k<3&&b.length?b[Math.min(k,b.length-1)]:''}; }));
+  try{ if(!list.length){ localStorage.removeItem(LS_NAK); return 'ok'; } }catch(e){ return 'fail'; }
+  for(let k=0;k<4;k++){ try{ localStorage.setItem(LS_NAK,mk(k)); return k?'klein':'ok'; }catch(e){} }
+  return 'fail';
+}
+function loadNak(){
+  let a=[]; try{ a=JSON.parse(localStorage.getItem(LS_NAK)||'[]'); }catch(e){ a=[]; } if(!Array.isArray(a))return;
+  a.forEach(o=>{ if(!o||!o.id||Q.items.some(x=>x.nid===o.id))return;
+    const it=newItem({name:o.name||'Loopfoto',loop:true,status:'nakijken',exif:o.exif||null,ai:o.ai||null,kader:o.kader||null,missing:Array.isArray(o.missing)?o.missing:[],msg:o.msg||'',warn:o.warn||'',thumb:typeof o.thumb==='string'?o.thumb:''});
+    it.nid=o.id; it.round='eerder'; it.big=typeof o.img==='string'?o.img:''; if(!it.thumb&&it.big)it.thumb=it.big; Q.items.push(it); });
+}
+function nakGo(){
+  const it=Q.items.find(x=>x.status==='nakijken');
+  if(it)setTimeout(()=>openReview(it),60); else setTimeout(()=>{ try{ $('#round-block').scrollIntoView({block:'start'}); }catch(e){} },60);
+}
+function nakDiscard(it){
+  if(cur.review===it){ cur.review=null; try{ $('#b-cancel').click(); }catch(e){} }
+  const i=Q.items.indexOf(it); if(i>=0)Q.items.splice(i,1);
+  saveNak(); renderQueue();
+}
+function renderRound(){
+  const L=Q.items.filter(x=>x.loop), nak=Q.items.filter(x=>x.status==='nakijken');
+  const bar=$('#nak-bar'); if(!bar)return;
+  bar.hidden=!nak.length; $('#nak-n').textContent=nak.length+' om na te kijken';
+  const blk=$('#round-block'), ol=$('#round-list'); blk.hidden=!L.length; ol.replaceChildren(); if(!L.length)return;
+  const cnt=st=>L.filter(x=>x.status===st).length, parts=[];
+  [['vastgelegd','vastgelegd'],['nakijken','nakijken'],['dubbel','dubbel'],['mislukt','mislukt']].forEach(p=>{ const n=cnt(p[0]); if(n)parts.push(n+' '+p[1]); });
+  const busy=cnt('wacht')+cnt('ai'); if(busy)parts.push(busy+' wachten nog');
+  $('#round-sum').textContent=parts.join(' · ');
+  L.forEach(it=>{
+    const li=h('li',{class:'q-row','data-status':it.status,'data-nid':it.nid||''});
+    li.append(it.thumb?h('img',{class:'q-th',src:it.thumb,alt:'Uitsnede van het bord',width:56,height:56}):h('span',{class:'q-th empty','aria-hidden':'true'}));
+    let title=it.name;
+    if(it.status==='vastgelegd'&&it.summary)title=titleOf(it.summary.code);
+    else if(it.ai&&it.ai.bordsoort&&it.ai.bordsoort!=='onbekend')title=titleOf(it.ai.bordsoort)+' (AI)';
+    const main=h('div',{class:'q-main'},[h('div',{class:'q-top'},[h('span',{class:'q-name',text:title}),qpill(it.status)])]);
+    if(it.status==='vastgelegd'&&it.summary)main.append(h('div',{class:'q-msg',text:(it.summary.gebied||'buiten de bekende gebieden')+' · '+(it.vastlegging==='nagekeken'?'Na nakijken vastgelegd.':'Vastgelegd in loopmodus.')}));
+    if(it.msg)main.append(h('div',{class:'q-msg',text:it.msg}));
+    if(it.round==='eerder')main.append(h('div',{class:'q-msg muted',text:'Uit een eerdere ronde.'}));
+    li.append(main);
+    const act=h('div',{class:'q-act'});
+    if(it.status==='nakijken')act.append(h('button',{type:'button',class:'btn sm primary',text:'Nakijken',onclick:()=>openReview(it)}));
+    if(it.status==='vastgelegd'&&it.bordId)act.append(h('button',{type:'button',class:'btn sm quiet',text:'Op de kaart',onclick:()=>openOnMap(it.bordId)}));
+    if(it.status==='nakijken'||it.status==='dubbel'||it.status==='mislukt')act.append(h('button',{type:'button',class:'btn sm quiet',text:'Weggooien',onclick:()=>nakDiscard(it)}));
+    if(act.children.length)li.append(act);
+    ol.append(li);
+  });
+  $('#b-round-clear').hidden=!(L.length&&!busy&&!loop.on);
+}
+
 function initLoop(){
   const av=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
   $('#loop-block').hidden=!av; loadLset();
+  loadNak(); renderQueue();
+  $('#b-nak-go').addEventListener('click',nakGo);
+  $('#b-round-clear').addEventListener('click',()=>{ if(cur.review&&cur.review.loop)$('#b-cancel').click(); Q.items=Q.items.filter(x=>!x.loop); saveNak(); renderQueue(); });
   $('#b-loop').addEventListener('click',startLoop);
   $('#b-loop-stop').addEventListener('click',stopLoop);
   $('#b-loop-sens').addEventListener('click',()=>{ const o=['laag','normaal','hoog']; lset.sens=o[(o.indexOf(lset.sens)+1)%3]; lsSet(LS_SENS,lset.sens); $('#l-sens').value=lset.sens; loop.lastKey=''; loopPills(); });
-  $('#b-loop-review').addEventListener('click',()=>{ closeLoop(); if(location.hash&&location.hash!=='#schouwen')location.hash='#schouwen'; else route(); setTimeout(()=>{ const t=document.querySelector('#queue li[data-status=nakijken]')||$('#queue'); try{ t.scrollIntoView({block:'center'}); }catch(e){} },80); });
+  $('#b-loop-review').addEventListener('click',()=>{ closeLoop(); if(location.hash&&location.hash!=='#schouwen')location.hash='#schouwen'; else route(); nakGo(); });
   $('#b-loop-map').addEventListener('click',()=>{ closeLoop(); const id=loop.lastBordId||(Q.items.filter(x=>x.loop&&x.bordId).pop()||{}).bordId; if(id)openOnMap(id); else location.hash='#kaart'; });
   $('#b-loop-close').addEventListener('click',closeLoop);
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&loop.on)stopLoop(); });
@@ -1984,7 +2072,7 @@ function init(){
   $('#b-fast-ex').addEventListener('click',addExamples);
   $('#b-q-stop').addEventListener('click',()=>{ Q.halt='stop'; if(Q.ctl)Q.ctl.abort(); });
   $('#b-q-go').addEventListener('click',runQueue);
-  $('#b-q-clear').addEventListener('click',()=>{ Q.items=[]; Q.halt=null; fastNote('',''); renderQueue(); });
+  $('#b-q-clear').addEventListener('click',()=>{ Q.items=Q.items.filter(x=>x.loop); Q.halt=null; fastNote('',''); renderQueue(); });
   $('#ex-code').addEventListener('change',updateExPrev);$('#ex-sector').addEventListener('change',updateExPrev);
   $('#b-example').addEventListener('click',async()=>{
     const code=$('#ex-code').value,sec=PAID.indexOf(code)>=0?$('#ex-sector').value:'';
